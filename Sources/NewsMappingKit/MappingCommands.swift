@@ -1,6 +1,8 @@
 import ArgumentParser
 import Foundation
 
+typealias ProgressHandler = @Sendable (String) -> Void
+
 struct StoreOptions: ParsableArguments {
   @Option(
     name: .customLong("store-path"),
@@ -163,7 +165,7 @@ private func resolveAndPersist(
   using store: ArticleMappings,
   resolver: AppleNewsMappingResolver = AppleNewsMappingResolver(),
   reuseStoredMappings: Bool = false,
-  progress: ((String) -> Void)? = nil
+  progress: ProgressHandler? = nil
 ) async throws -> ResolutionSummary {
   var summary = ResolutionSummary()
   var orderedMappings = [(Int, ArticleMapping)]()

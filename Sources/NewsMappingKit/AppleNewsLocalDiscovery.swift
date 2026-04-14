@@ -178,6 +178,23 @@ struct LocalAppleNewsDatabaseURLs: Sendable {
   )
 }
 
+private enum ProtectedAppleNewsStore: CaseIterable {
+  case articleExposures
+  case feedDatabase
+  case todayFeedDatabase
+
+  var label: String {
+    switch self {
+    case .articleExposures:
+      return "article_exposures"
+    case .feedDatabase:
+      return "feeddatabase"
+    case .todayFeedDatabase:
+      return "today-feed-db"
+    }
+  }
+}
+
 private struct LocalAppleNewsDatabaseSnapshot: Codable, Equatable, Sendable {
   let path: String
   let exists: Bool
@@ -203,10 +220,26 @@ private struct LocalAppleNewsDatabaseSnapshot: Codable, Equatable, Sendable {
   }
 }
 
+private struct LocalAppleNewsDatabaseSnapshotSet: Codable, Equatable, Sendable {
+  let articleExposures: LocalAppleNewsDatabaseSnapshot
+  let feedDatabase: LocalAppleNewsDatabaseSnapshot
+  let todayFeedDatabase: LocalAppleNewsDatabaseSnapshot
+
+  init(databaseURLs: LocalAppleNewsDatabaseURLs) {
+    articleExposures = LocalAppleNewsDatabaseSnapshot(
+      url: databaseURLs.articleExposuresURL
+    )
+    feedDatabase = LocalAppleNewsDatabaseSnapshot(
+      url: databaseURLs.feedDatabaseURL
+    )
+    todayFeedDatabase = LocalAppleNewsDatabaseSnapshot(
+      url: databaseURLs.todayFeedDatabaseURL
+    )
+  }
+}
+
 private struct LocalAppleNewsDatabaseReferenceCacheRecord: Codable, Sendable {
-  let articleExposuresSnapshot: LocalAppleNewsDatabaseSnapshot
-  let feedDatabaseSnapshot: LocalAppleNewsDatabaseSnapshot
-  let todayFeedDatabaseSnapshot: LocalAppleNewsDatabaseSnapshot
+  let snapshots: LocalAppleNewsDatabaseSnapshotSet
   let articleIDs: [String]
 }
 
@@ -222,17 +255,9 @@ struct LocalAppleNewsDatabaseReferenceCache: Sendable {
   {
     guard
       let record = loadRecord(),
-      record.articleExposuresSnapshot
-        == LocalAppleNewsDatabaseSnapshot(
-          url: databaseURLs.articleExposuresURL
-        ),
-      record.feedDatabaseSnapshot
-        == LocalAppleNewsDatabaseSnapshot(
-          url: databaseURLs.feedDatabaseURL
-        ),
-      record.todayFeedDatabaseSnapshot
-        == LocalAppleNewsDatabaseSnapshot(
-          url: databaseURLs.todayFeedDatabaseURL
+      record.snapshots
+        == LocalAppleNewsDatabaseSnapshotSet(
+          databaseURLs: databaseURLs
         )
     else {
       return nil
@@ -248,15 +273,7 @@ struct LocalAppleNewsDatabaseReferenceCache: Sendable {
     for databaseURLs: LocalAppleNewsDatabaseURLs
   ) {
     let record = LocalAppleNewsDatabaseReferenceCacheRecord(
-      articleExposuresSnapshot: LocalAppleNewsDatabaseSnapshot(
-        url: databaseURLs.articleExposuresURL
-      ),
-      feedDatabaseSnapshot: LocalAppleNewsDatabaseSnapshot(
-        url: databaseURLs.feedDatabaseURL
-      ),
-      todayFeedDatabaseSnapshot: LocalAppleNewsDatabaseSnapshot(
-        url: databaseURLs.todayFeedDatabaseURL
-      ),
+      snapshots: LocalAppleNewsDatabaseSnapshotSet(databaseURLs: databaseURLs),
       articleIDs: references.map(\.id)
     )
 
@@ -804,7 +821,7 @@ struct LocalAppleNewsDatabaseReferenceDiscoverer: Sendable {
   }
 
   func articleReferences(
-    progress: ((String) -> Void)? = nil
+    progress: ProgressHandler? = nil
   ) -> [AppleNewsArticleReference] {
     if let cachedReferences = cache?.articleReferences(for: databaseURLs) {
       progress?(
@@ -816,35 +833,34 @@ struct LocalAppleNewsDatabaseReferenceDiscoverer: Sendable {
     var results = [AppleNewsArticleReference]()
     var seenIDs = Set<String>()
 
-    progress?("Scanning protected store article_exposures...")
-    append(
-      articleExposureReferences(),
-      label: "article_exposures",
-      to: &results,
-      seenIDs: &seenIDs,
-      progress: progress
-    )
-    progress?("Scanning protected store feeddatabase...")
-    append(
-      feedDatabaseReferences(),
-      label: "feeddatabase",
-      to: &results,
-      seenIDs: &seenIDs,
-      progress: progress
-    )
-    progress?("Scanning protected store today-feed-db...")
-    append(
-      todayFeedReferences(),
-      label: "today-feed-db",
-      to: &results,
-      seenIDs: &seenIDs,
-      progress: progress
-    )
+    for store in ProtectedAppleNewsStore.allCases {
+      progress?("Scanning protected store \(store.label)...")
+      append(
+        references(in: store),
+        label: store.label,
+        to: &results,
+        seenIDs: &seenIDs,
+        progress: progress
+      )
+    }
 
     cache?.save(results, for: databaseURLs)
     progress?("Cached \(results.count) protected-store Apple News URLs.")
 
     return results
+  }
+
+  private func references(in store: ProtectedAppleNewsStore)
+    -> [AppleNewsArticleReference]
+  {
+    switch store {
+    case .articleExposures:
+      articleExposureReferences()
+    case .feedDatabase:
+      feedDatabaseReferences()
+    case .todayFeedDatabase:
+      todayFeedReferences()
+    }
   }
 
   private func articleExposureReferences() -> [AppleNewsArticleReference] {
@@ -940,16 +956,15 @@ struct LocalAppleNewsDatabaseReferenceDiscoverer: Sendable {
     label: String,
     to results: inout [AppleNewsArticleReference],
     seenIDs: inout Set<String>,
-    progress: ((String) -> Void)?
+    progress: ProgressHandler?
   ) {
-    let initialCount = results.count
-
-    for reference in references where seenIDs.insert(reference.id).inserted {
-      results.append(reference)
+    let insertedReferences = references.filter {
+      seenIDs.insert($0.id).inserted
     }
+    results.append(contentsOf: insertedReferences)
 
     progress?(
-      "Protected store \(label) added \(results.count - initialCount) unique Apple News URLs (\(results.count) total)."
+      "Protected store \(label) added \(insertedReferences.count) unique Apple News URLs (\(results.count) total)."
     )
   }
 }
@@ -980,7 +995,7 @@ struct LocalAppleNewsDiscovery: Sendable {
     referralItemsURL: URL,
     searchRootURLs: [URL],
     includeFileScan: Bool = false,
-    progress: ((String) -> Void)? = nil
+    progress: ProgressHandler? = nil
   ) throws -> LocalAppleNewsDiscoveryResult {
     progress?("Scanning referral items for local publisher mappings...")
     var mappingsByID = [String: ArticleMapping]()
