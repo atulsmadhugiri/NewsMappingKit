@@ -8,6 +8,7 @@ struct NewsMappingKit: AsyncParsableCommand {
     subcommands: [
       AddMapping.self,
       ResolveAppleNews.self,
+      DiscoverBlueskyAppleNews.self,
       DiscoverLocalMappings.self,
       LookupAppleNews.self,
       LookupPublisher.self,

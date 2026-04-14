@@ -30,6 +30,7 @@ playground.xcworkspace
 # .swiftpm
 
 .build/
+Sources/NewsMappingKit/Secrets.swift
 
 # CocoaPods
 #

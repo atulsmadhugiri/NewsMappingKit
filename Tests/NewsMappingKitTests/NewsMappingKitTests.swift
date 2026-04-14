@@ -29,6 +29,28 @@ private enum TestError: Error {
   case missingMockResponse
 }
 
+private struct URLResponseHTTPClient: HTTPClient {
+  let responses: [URL: (Int, String)]
+
+  func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+    guard let url = request.url, let (statusCode, responseBody) = responses[url]
+    else {
+      throw TestError.missingMockResponse
+    }
+
+    let response = try #require(
+      HTTPURLResponse(
+        url: url,
+        statusCode: statusCode,
+        httpVersion: nil,
+        headerFields: nil
+      )
+    )
+
+    return (Data(responseBody.utf8), response)
+  }
+}
+
 private func createSQLiteDatabase(
   at url: URL,
   statements: [String]
@@ -671,4 +693,258 @@ func localAppleNewsDiscoveryOnlyScansFilesWhenRequested() throws {
       "PQ6l8CQu_j5qqdTdZfptvyw",
     ]
   )
+}
+
+@Test
+func blueskySearchDiscovererFindsAppleNewsURLsAcrossPages() async throws {
+  let apiBaseURL = try #require(URL(string: "https://api.test"))
+  let pageOneURL = try #require(
+    URL(
+      string:
+        "https://api.test/xrpc/app.bsky.feed.searchPosts?q=apple.news&sort=latest&limit=3"
+    )
+  )
+  let pageTwoURL = try #require(
+    URL(
+      string:
+        "https://api.test/xrpc/app.bsky.feed.searchPosts?q=apple.news&sort=latest&limit=1&cursor=next-1"
+    )
+  )
+  let discoverer = BlueskySearchDiscoverer(
+    unauthenticatedAPIBaseURL: apiBaseURL,
+    client: URLResponseHTTPClient(
+      responses: [
+        pageOneURL: (
+          200,
+          """
+          {
+            "posts": [
+              {
+                "record": {
+                  "text": "first",
+                  "facets": [
+                    {
+                      "features": [
+                        {
+                          "uri": "https://apple.news/AgYBtZhCLTD2ZCmgVQI1g6w"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "embed": {
+                  "external": {
+                    "uri": "https://apple.news/AE6VqukUiTbWVl_629NVnlA"
+                  }
+                }
+              }
+            ],
+            "cursor": "next-1"
+          }
+          """
+        ),
+        pageTwoURL: (
+          200,
+          """
+          {
+            "posts": [
+              {
+                "embed": {
+                  "external": {
+                    "uri": "https://apple.news/AE6VqukUiTbWVl_629NVnlA"
+                  }
+                }
+              },
+              {
+                "record": {
+                  "text": "third",
+                  "facets": [
+                    {
+                      "features": [
+                        {
+                          "uri": "https://apple.news/PwUAzN8gHXeVyBRdor7WHib"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+          """
+        ),
+      ]
+    )
+  )
+
+  let references = try await discoverer.articleReferences(
+    query: "apple.news",
+    limit: 3,
+    maxPages: 2
+  )
+
+  #expect(
+    references.map(\.id) == [
+      "AgYBtZhCLTD2ZCmgVQI1g6w",
+      "AE6VqukUiTbWVl_629NVnlA",
+      "PwUAzN8gHXeVyBRdor7WHib",
+    ]
+  )
+}
+
+@Test
+func blueskySearchDiscovererCanAuthenticateAndPage() async throws {
+  let unauthenticatedAPIBaseURL = try #require(
+    URL(string: "https://public.api.test")
+  )
+  let authenticatedAPIBaseURL = try #require(
+    URL(string: "https://auth.api.test")
+  )
+  let sessionURL = try #require(
+    URL(
+      string: "https://auth.api.test/xrpc/com.atproto.server.createSession"
+    )
+  )
+  let pageOneURL = try #require(
+    URL(
+      string:
+        "https://auth.api.test/xrpc/app.bsky.feed.searchPosts?q=apple.news&sort=latest&limit=2"
+    )
+  )
+  let pageTwoURL = try #require(
+    URL(
+      string:
+        "https://auth.api.test/xrpc/app.bsky.feed.searchPosts?q=apple.news&sort=latest&limit=1&cursor=next-1"
+    )
+  )
+  let discoverer = BlueskySearchDiscoverer(
+    unauthenticatedAPIBaseURL: unauthenticatedAPIBaseURL,
+    authenticatedAPIBaseURL: authenticatedAPIBaseURL,
+    client: URLResponseHTTPClient(
+      responses: [
+        sessionURL: (
+          200,
+          """
+          {
+            "accessJwt": "token-123"
+          }
+          """
+        ),
+        pageOneURL: (
+          200,
+          """
+          {
+            "posts": [
+              {
+                "embed": {
+                  "external": {
+                    "uri": "https://apple.news/AgYBtZhCLTD2ZCmgVQI1g6w"
+                  }
+                }
+              }
+            ],
+            "cursor": "next-1"
+          }
+          """
+        ),
+        pageTwoURL: (
+          200,
+          """
+          {
+            "posts": [
+              {
+                "embed": {
+                  "external": {
+                    "uri": "https://apple.news/AE6VqukUiTbWVl_629NVnlA"
+                  }
+                }
+              }
+            ]
+          }
+          """
+        ),
+      ]
+    )
+  )
+
+  let references = try await discoverer.articleReferences(
+    query: "apple.news",
+    limit: 2,
+    maxPages: 2,
+    credentials: BlueskyCredentials(
+      identifier: "example.bsky.social",
+      appPassword: "password"
+    )
+  )
+
+  #expect(
+    references.map(\.id) == [
+      "AgYBtZhCLTD2ZCmgVQI1g6w",
+      "AE6VqukUiTbWVl_629NVnlA",
+    ]
+  )
+}
+
+@Test
+func blueskySearchDiscovererRejectsNonArticleAppleNewsURLs() async throws {
+  let apiBaseURL = try #require(URL(string: "https://api.test"))
+  let pageURL = try #require(
+    URL(
+      string:
+        "https://api.test/xrpc/app.bsky.feed.searchPosts?q=apple.news&sort=latest&limit=10"
+    )
+  )
+  let discoverer = BlueskySearchDiscoverer(
+    unauthenticatedAPIBaseURL: apiBaseURL,
+    client: URLResponseHTTPClient(
+      responses: [
+        pageURL: (
+          200,
+          """
+          {
+            "posts": [
+              {
+                "embed": {
+                  "external": {
+                    "uri": "https://apple.news/"
+                  }
+                }
+              },
+              {
+                "embed": {
+                  "external": {
+                    "uri": "https://apple.news/magazines"
+                  }
+                }
+              },
+              {
+                "record": {
+                  "facets": [
+                    {
+                      "features": [
+                        {
+                          "uri": "https://apple.news/AgYBtZhCLTD2ZCmgVQI1g6w?highlight=test"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+          """
+        )
+      ]
+    )
+  )
+
+  let references = try await discoverer.articleReferences(
+    query: "apple.news",
+    limit: 10,
+    maxPages: 1
+  )
+
+  #expect(references.map(\.id) == ["AgYBtZhCLTD2ZCmgVQI1g6w"])
 }
