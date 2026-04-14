@@ -60,6 +60,10 @@ final class ArticleMappings {
   }
 
   func upsertAll(_ mappings: [ArticleMapping]) throws {
+    guard !mappings.isEmpty else {
+      return
+    }
+
     for mapping in mappings {
       try upsert(mapping, saveChanges: false)
     }
@@ -75,7 +79,10 @@ final class ArticleMappings {
   }
 
   func mappingsByAppleNewsID() throws -> [String: ArticleMapping] {
-    Dictionary(uniqueKeysWithValues: try allMappings().map { ($0.id, $0) })
+    Dictionary(
+      try allMappings().map { ($0.id, $0) },
+      uniquingKeysWith: { _, latest in latest }
+    )
   }
 
   func upsertDiscoveries(_ articles: [AppleNewsArticleReference]) throws {

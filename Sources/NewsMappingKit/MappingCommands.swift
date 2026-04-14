@@ -3,6 +3,21 @@ import Foundation
 
 typealias ProgressHandler = @Sendable (String) -> Void
 
+private enum ResolutionConfiguration {
+  static let defaultConcurrency = min(
+    32,
+    max(8, ProcessInfo.processInfo.activeProcessorCount * 2)
+  )
+
+  static func progressInterval(for total: Int) -> Int {
+    max(1, min(250, max(total / 100, 1)))
+  }
+
+  static func progressPrefix(processed: Int, total: Int) -> String {
+    "[\(processed.formatted())/\(total.formatted())]"
+  }
+}
+
 struct StoreOptions: ParsableArguments {
   @Option(
     name: .customLong("store-path"),
@@ -18,6 +33,23 @@ struct StoreOptions: ParsableArguments {
 
       return try ArticleMappings(
         location: .file(storePath.expandedFileURL)
+      )
+    }
+  }
+}
+
+struct ResolutionOptions: ParsableArguments {
+  @Option(
+    name: .customLong("resolution-concurrency"),
+    help:
+      "Maximum number of concurrent Apple News page fetches while resolving missing publisher mappings."
+  )
+  var concurrency = ResolutionConfiguration.defaultConcurrency
+
+  func validate() throws {
+    guard concurrency > 0 else {
+      throw ValidationError(
+        "--resolution-concurrency must be greater than 0."
       )
     }
   }
@@ -91,23 +123,18 @@ private func deduplicatedURLs(_ urls: [URL]) -> [URL] {
   }
 }
 
-private func deduplicatedArticleReferences(
-  _ references: [AppleNewsArticleReference]
-) -> [AppleNewsArticleReference] {
-  var seenIDs = Set<String>()
-
-  return references.filter { reference in
-    seenIDs.insert(reference.id).inserted
-  }
-}
-
 private func discoveredAppleNewsReferences(
   from result: LocalAppleNewsDiscoveryResult
 ) -> [AppleNewsArticleReference] {
-  deduplicatedArticleReferences(
-    result.mappings.map(\.appleNews) + result.articleReferences
+  Array(
+    Dictionary(
+      (result.mappings.map(\.appleNews) + result.articleReferences).map {
+        ($0.id, $0)
+      },
+      uniquingKeysWith: { _, latest in latest }
+    ).values
   )
-  .sorted { $0.url.absoluteString < $1.url.absoluteString }
+  .sorted(using: KeyPathComparator(\.id))
 }
 
 private func persistAndPrint(
@@ -146,8 +173,6 @@ private enum ResolutionOutcome: Sendable {
   case failure(index: Int, AppleNewsArticleReference, String)
 }
 
-private let maxResolutionConcurrency = 8
-
 private func resolveOutcome(
   for article: AppleNewsArticleReference,
   at index: Int,
@@ -165,11 +190,14 @@ private func resolveAndPersist(
   using store: ArticleMappings,
   resolver: AppleNewsMappingResolver = AppleNewsMappingResolver(),
   reuseStoredMappings: Bool = false,
+  maxConcurrency: Int = ResolutionConfiguration.defaultConcurrency,
   progress: ProgressHandler? = nil
 ) async throws -> ResolutionSummary {
   var summary = ResolutionSummary()
   var orderedMappings = [(Int, ArticleMapping)]()
   var unresolvedArticles = [(Int, AppleNewsArticleReference)]()
+  orderedMappings.reserveCapacity(articles.count)
+  unresolvedArticles.reserveCapacity(articles.count)
 
   let storedMappingsByID: [String: ArticleMapping] =
     if reuseStoredMappings {
@@ -195,19 +223,18 @@ private func resolveAndPersist(
 
   if !unresolvedArticles.isEmpty {
     progress?(
-      "Resolving \(unresolvedArticles.count) Apple News URLs with up to \(maxResolutionConcurrency) concurrent requests..."
+      "Resolving publisher URLs \(ResolutionConfiguration.progressPrefix(processed: 0, total: unresolvedArticles.count)) with up to \(maxConcurrency.formatted()) concurrent requests..."
     )
   }
 
-  let progressInterval = max(
-    100,
-    min(1_000, max(unresolvedArticles.count / 20, 1))
+  let progressInterval = ResolutionConfiguration.progressInterval(
+    for: unresolvedArticles.count
   )
   var processedCount = 0
   var iterator = unresolvedArticles.makeIterator()
 
   await withTaskGroup(of: ResolutionOutcome.self) { group in
-    for _ in 0..<min(maxResolutionConcurrency, unresolvedArticles.count) {
+    for _ in 0..<min(maxConcurrency, unresolvedArticles.count) {
       guard let (index, article) = iterator.next() else {
         break
       }
@@ -227,7 +254,7 @@ private func resolveAndPersist(
       case .failure(_, let article, let message):
         summary.failures += 1
         writeError(
-          "Failed to resolve \(article.url.absoluteString): \(message)"
+          "\(ResolutionConfiguration.progressPrefix(processed: processedCount, total: unresolvedArticles.count)) Failed to resolve \(article.url.absoluteString): \(message)"
         )
       }
 
@@ -235,7 +262,7 @@ private func resolveAndPersist(
         || processedCount.isMultiple(of: progressInterval)
       {
         progress?(
-          "Processed \(processedCount)/\(unresolvedArticles.count) network lookups (\(summary.persistedCount) succeeded, \(summary.failures) failures)."
+          "Resolving publisher URLs \(ResolutionConfiguration.progressPrefix(processed: processedCount, total: unresolvedArticles.count)) (\(summary.persistedCount.formatted()) succeeded, \(summary.failures.formatted()) failures)."
         )
       }
 
@@ -291,6 +318,7 @@ struct ResolveAppleNews: AsyncParsableCommand {
   )
 
   @OptionGroup var storeOptions: StoreOptions
+  @OptionGroup var resolutionOptions: ResolutionOptions
 
   @Argument(help: "One or more Apple News URLs.")
   var appleNews: [AppleNewsArticleReference]
@@ -300,6 +328,7 @@ struct ResolveAppleNews: AsyncParsableCommand {
     let summary = try await resolveAndPersist(
       appleNews,
       using: store,
+      maxConcurrency: resolutionOptions.concurrency,
       progress: writeProgress
     )
 
@@ -318,6 +347,7 @@ struct DiscoverLocalMappings: AsyncParsableCommand {
 
   @OptionGroup var storeOptions: StoreOptions
   @OptionGroup var localDiscoveryOptions: LocalDiscoveryOptions
+  @OptionGroup var resolutionOptions: ResolutionOptions
 
   mutating func run() async throws {
     let store = try storeOptions.store
@@ -352,6 +382,7 @@ struct DiscoverLocalMappings: AsyncParsableCommand {
           result.articleReferences,
           using: store,
           reuseStoredMappings: true,
+          maxConcurrency: resolutionOptions.concurrency,
           progress: writeProgress
         )
       } else {

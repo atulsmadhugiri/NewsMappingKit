@@ -56,16 +56,15 @@ final class AppleNewsDiscoveries {
     let timestamp = Date()
 
     for article in articles {
-      if var existingRecord = recordsByID[article.id] {
-        existingRecord.lastDiscoveredAt = timestamp
-        recordsByID[article.id] = existingRecord
-      } else {
-        recordsByID[article.id] = AppleNewsDiscoveryRecord(
+      var record =
+        recordsByID[article.id]
+        ?? AppleNewsDiscoveryRecord(
           article: article,
           firstDiscoveredAt: timestamp,
           lastDiscoveredAt: timestamp
         )
-      }
+      record.lastDiscoveredAt = timestamp
+      recordsByID[article.id] = record
     }
 
     try persist()
@@ -83,13 +82,12 @@ final class AppleNewsDiscoveries {
   }
 
   private func sortedRecords() -> [AppleNewsDiscoveryRecord] {
-    recordsByID.values.sorted {
-      if $0.lastDiscoveredAt != $1.lastDiscoveredAt {
-        return $0.lastDiscoveredAt > $1.lastDiscoveredAt
-      }
-
-      return $0.appleNewsID < $1.appleNewsID
-    }
+    Array(recordsByID.values).sorted(
+      using: [
+        KeyPathComparator(\.lastDiscoveredAt, order: .reverse),
+        KeyPathComparator(\.appleNewsID),
+      ]
+    )
   }
 
   private func persist() throws {
@@ -122,7 +120,8 @@ final class AppleNewsDiscoveries {
     )
 
     return Dictionary(
-      uniqueKeysWithValues: records.map { ($0.appleNewsID, $0) }
+      records.map { ($0.appleNewsID, $0) },
+      uniquingKeysWith: { _, latest in latest }
     )
   }
 }

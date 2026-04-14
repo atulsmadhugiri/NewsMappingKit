@@ -17,33 +17,37 @@ enum LocalAppleNewsDiscoveryError: LocalizedError {
 }
 
 enum LocalAppleNewsPaths {
-  static let referralItemsURL = FileManager.default.homeDirectoryForCurrentUser
-    .appending(
-      path:
-        "Library/News/com.apple.news.public-com.apple.news.private-production/referralItems",
-      directoryHint: .isDirectory
-    )
+  private static let homeDirectoryURL = FileManager.default
+    .homeDirectoryForCurrentUser
+
+  private static func homeURL(
+    _ path: String,
+    directoryHint: URL.DirectoryHint
+  ) -> URL {
+    homeDirectoryURL.appending(path: path, directoryHint: directoryHint)
+  }
+
+  static let referralItemsURL = homeURL(
+    "Library/News/com.apple.news.public-com.apple.news.private-production/referralItems",
+    directoryHint: .isDirectory
+  )
 
   static let newsStorageURL = referralItemsURL.deletingLastPathComponent()
 
-  static let newsContainerURL = FileManager.default.homeDirectoryForCurrentUser
-    .appending(
-      path: "Library/Containers/com.apple.news",
-      directoryHint: .isDirectory
-    )
+  static let newsContainerURL = homeURL(
+    "Library/Containers/com.apple.news",
+    directoryHint: .isDirectory
+  )
 
   static let newsCacheURL = newsContainerURL.appending(
     path: "Data/Library/Caches/News/com.apple.news.public-production-143441",
     directoryHint: .isDirectory
   )
 
-  static let articleExposuresURL = FileManager.default
-    .homeDirectoryForCurrentUser
-    .appending(
-      path:
-        "Library/Group Containers/group.com.apple.news/com.apple.news.public-com.apple.news.private-production/article_exposures",
-      directoryHint: .notDirectory
-    )
+  static let articleExposuresURL = homeURL(
+    "Library/Group Containers/group.com.apple.news/com.apple.news.public-com.apple.news.private-production/article_exposures",
+    directoryHint: .notDirectory
+  )
 
   static let feedDatabaseURL = newsCacheURL.appending(
     path: "feeddatabase",
@@ -64,45 +68,42 @@ enum LocalAppleNewsPaths {
 
   static let defaultSearchRootURLs = [
     newsStorageURL,
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Caches/com.apple.newsd",
+    homeURL("Library/Caches/com.apple.newsd", directoryHint: .isDirectory),
+    homeURL(
+      "Library/HTTPStorages/com.apple.newsd",
       directoryHint: .isDirectory
     ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/HTTPStorages/com.apple.newsd",
+    homeURL(
+      "Library/Group Containers/group.com.apple.news",
       directoryHint: .isDirectory
     ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Group Containers/group.com.apple.news",
-      directoryHint: .isDirectory
-    ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Group Containers/group.com.apple.newsd",
+    homeURL(
+      "Library/Group Containers/group.com.apple.newsd",
       directoryHint: .isDirectory
     ),
     newsContainerURL,
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Containers/com.apple.news.tag",
+    homeURL(
+      "Library/Containers/com.apple.news.tag",
       directoryHint: .isDirectory
     ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Containers/com.apple.news.widget",
+    homeURL(
+      "Library/Containers/com.apple.news.widget",
       directoryHint: .isDirectory
     ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Containers/com.apple.news.widgetintents",
+    homeURL(
+      "Library/Containers/com.apple.news.widgetintents",
       directoryHint: .isDirectory
     ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Containers/com.apple.news.engagementExtension",
+    homeURL(
+      "Library/Containers/com.apple.news.engagementExtension",
       directoryHint: .isDirectory
     ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Containers/com.apple.news.openinnews",
+    homeURL(
+      "Library/Containers/com.apple.news.openinnews",
       directoryHint: .isDirectory
     ),
-    FileManager.default.homeDirectoryForCurrentUser.appending(
-      path: "Library/Containers/com.apple.news.articlenotificationextension",
+    homeURL(
+      "Library/Containers/com.apple.news.articlenotificationextension",
       directoryHint: .isDirectory
     ),
   ]
@@ -253,12 +254,13 @@ struct LocalAppleNewsDatabaseReferenceCache: Sendable {
   func articleReferences(for databaseURLs: LocalAppleNewsDatabaseURLs)
     -> [AppleNewsArticleReference]?
   {
+    let snapshots = LocalAppleNewsDatabaseSnapshotSet(
+      databaseURLs: databaseURLs
+    )
+
     guard
       let record = loadRecord(),
-      record.snapshots
-        == LocalAppleNewsDatabaseSnapshotSet(
-          databaseURLs: databaseURLs
-        )
+      record.snapshots == snapshots
     else {
       return nil
     }
@@ -272,8 +274,11 @@ struct LocalAppleNewsDatabaseReferenceCache: Sendable {
     _ references: [AppleNewsArticleReference],
     for databaseURLs: LocalAppleNewsDatabaseURLs
   ) {
+    let snapshots = LocalAppleNewsDatabaseSnapshotSet(
+      databaseURLs: databaseURLs
+    )
     let record = LocalAppleNewsDatabaseReferenceCacheRecord(
-      snapshots: LocalAppleNewsDatabaseSnapshotSet(databaseURLs: databaseURLs),
+      snapshots: snapshots,
       articleIDs: references.map(\.id)
     )
 
@@ -998,11 +1003,10 @@ struct LocalAppleNewsDiscovery: Sendable {
     progress: ProgressHandler? = nil
   ) throws -> LocalAppleNewsDiscoveryResult {
     progress?("Scanning referral items for local publisher mappings...")
-    var mappingsByID = [String: ArticleMapping]()
-
-    for mapping in try entryDiscovery.mappings(in: referralItemsURL) {
-      mappingsByID[mapping.id] = mapping
-    }
+    let mappingsByID = Dictionary(
+      try entryDiscovery.mappings(in: referralItemsURL).map { ($0.id, $0) },
+      uniquingKeysWith: { _, latest in latest }
+    )
 
     progress?(
       "Referral items yielded \(mappingsByID.count) local publisher mappings."
@@ -1036,12 +1040,11 @@ struct LocalAppleNewsDiscovery: Sendable {
       )
     }
 
-    let articleReferences = articleReferencesByID.values.sorted {
-      $0.url.absoluteString < $1.url.absoluteString
-    }
-    let mappings = mappingsByID.values.sorted {
-      $0.appleNews.url.absoluteString < $1.appleNews.url.absoluteString
-    }
+    let articleReferences = Array(articleReferencesByID.values)
+      .sorted(using: KeyPathComparator(\.id))
+    let mappings = Array(mappingsByID.values).sorted(
+      using: KeyPathComparator(\.id)
+    )
 
     return LocalAppleNewsDiscoveryResult(
       mappings: mappings,
