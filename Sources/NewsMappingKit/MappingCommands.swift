@@ -22,6 +22,10 @@ struct StoreOptions: ParsableArguments {
   }
 }
 
+private func writeError(_ message: String) {
+  FileHandle.standardError.write(Data("\(message)\n".utf8))
+}
+
 struct AddMapping: ParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "add",
@@ -42,6 +46,42 @@ struct AddMapping: ParsableCommand {
     try storeOptions.store.upsert(mapping)
 
     print(mapping)
+  }
+}
+
+struct ResolveAppleNews: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "resolve-apple",
+    abstract:
+      "Fetch Apple News pages, extract publisher URLs, and persist mappings."
+  )
+
+  @OptionGroup var storeOptions: StoreOptions
+
+  @Argument(help: "One or more Apple News URLs.")
+  var appleNews: [AppleNewsArticleReference]
+
+  mutating func run() async throws {
+    let store = try storeOptions.store
+    let resolver = AppleNewsMappingResolver()
+    var failures = 0
+
+    for article in appleNews {
+      do {
+        let mapping = try await resolver.resolve(article)
+        try store.upsert(mapping)
+        print(mapping)
+      } catch {
+        failures += 1
+        writeError(
+          "Failed to resolve \(article.url.absoluteString): \(error.localizedDescription)"
+        )
+      }
+    }
+
+    if failures > 0 {
+      throw ExitCode.failure
+    }
   }
 }
 
