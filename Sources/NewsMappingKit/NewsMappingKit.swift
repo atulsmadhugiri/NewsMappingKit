@@ -4,17 +4,12 @@ import ArgumentParser
 struct NewsMappingKit: ParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "news-mapping-kit",
-    abstract: "A lightweight CLI scaffold for NewsMappingKit."
+    abstract: "Store and resolve Apple News article mappings.",
+    subcommands: [
+      AddMapping.self,
+      LookupAppleNews.self,
+      LookupPublisher.self,
+      ListMappings.self,
+    ]
   )
-
-  @Flag(help: "Emit extra startup details.")
-  var verbose = false
-
-  mutating func run() throws {
-    if verbose {
-      print("Starting NewsMappingKit CLI...")
-    }
-
-    print("NewsMappingKit CLI scaffold is ready.")
-  }
 }

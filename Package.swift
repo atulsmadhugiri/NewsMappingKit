@@ -5,6 +5,9 @@ import PackageDescription
 
 let package = Package(
   name: "NewsMappingKit",
+  platforms: [
+    .macOS(.v14)
+  ],
   dependencies: [
     .package(
       url: "https://github.com/apple/swift-argument-parser",
@@ -17,7 +20,11 @@ let package = Package(
       dependencies: [
         .product(name: "ArgumentParser", package: "swift-argument-parser")
       ]
-    )
+    ),
+    .testTarget(
+      name: "NewsMappingKitTests",
+      dependencies: ["NewsMappingKit"]
+    ),
   ],
   swiftLanguageModes: [.v6]
 )
