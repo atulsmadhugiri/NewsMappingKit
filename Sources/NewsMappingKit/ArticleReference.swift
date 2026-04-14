@@ -51,6 +51,19 @@ struct AppleNewsArticleReference: Hashable, Codable, Sendable,
   let id: String
   let url: URL
 
+  init(id: String) throws {
+    let trimmedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedID.isEmpty else {
+      throw ArticleReferenceError.missingAppleNewsIdentifier(
+        URL(string: "https://\(appleNewsHost)")!
+      )
+    }
+
+    try self.init(
+      url: URL(string: "https://\(appleNewsHost)/\(trimmedID)")!
+    )
+  }
+
   init(url: URL) throws {
     let canonicalURL = try url.canonicalizedForMapping()
 
@@ -58,15 +71,24 @@ struct AppleNewsArticleReference: Hashable, Codable, Sendable,
       throw ArticleReferenceError.invalidAppleNewsHost(canonicalURL)
     }
 
-    let id = canonicalURL.lastPathComponent.trimmingCharacters(
+    var components = URLComponents(
+      url: canonicalURL,
+      resolvingAgainstBaseURL: false
+    )
+    components?.scheme = "https"
+    let secureURL =
+      components?.url
+      ?? canonicalURL
+
+    let id = secureURL.lastPathComponent.trimmingCharacters(
       in: .whitespacesAndNewlines
     )
     guard !id.isEmpty, id != "/" else {
-      throw ArticleReferenceError.missingAppleNewsIdentifier(canonicalURL)
+      throw ArticleReferenceError.missingAppleNewsIdentifier(secureURL)
     }
 
     self.id = id
-    self.url = canonicalURL
+    self.url = secureURL
   }
 
   var description: String {

@@ -14,16 +14,250 @@ struct StoreOptions: ParsableArguments {
         return try ArticleMappings()
       }
 
-      let expandedPath = NSString(string: storePath).expandingTildeInPath
       return try ArticleMappings(
-        location: .file(URL(filePath: expandedPath))
+        location: .file(storePath.expandedFileURL)
       )
     }
   }
 }
 
+struct LocalDiscoveryOptions: ParsableArguments {
+  @Option(
+    name: .customLong("referral-items-path"),
+    help: "Custom location for the Apple News referralItems directory."
+  )
+  var referralItemsPath: String?
+
+  @Option(
+    name: .customLong("scan-root-path"),
+    help:
+      "Additional local directories to include in the exhaustive file scan. Can be repeated."
+  )
+  var scanRootPaths: [String] = []
+
+  @Flag(
+    name: .customLong("exhaustive-file-scan"),
+    inversion: .prefixedNo,
+    help:
+      "Also scan raw local files for extra Apple News URLs beyond referral entries and protected databases."
+  )
+  var exhaustiveFileScan = true
+
+  var referralItemsURL: URL {
+    guard let referralItemsPath else {
+      return LocalAppleNewsPaths.referralItemsURL
+    }
+
+    return referralItemsPath.expandedFileURL
+  }
+
+  var searchRootURLs: [URL] {
+    deduplicatedURLs(
+      [referralItemsURL.deletingLastPathComponent()]
+        + LocalAppleNewsPaths.defaultSearchRootURLs
+        + scanRootPaths.map(\.expandedFileURL)
+    )
+  }
+  @Flag(
+    name: .customLong("resolve-missing"),
+    inversion: .prefixedNo,
+    help:
+      "Fetch Apple News pages for discovered Apple News URLs that do not already have a local publisher mapping."
+  )
+  var resolveMissing = true
+}
+
+extension String {
+  fileprivate var expandedFileURL: URL {
+    URL(filePath: NSString(string: self).expandingTildeInPath)
+  }
+}
+
 private func writeError(_ message: String) {
   FileHandle.standardError.write(Data("\(message)\n".utf8))
+}
+
+private func writeProgress(_ message: String) {
+  writeError("[progress] \(message)")
+}
+
+private func deduplicatedURLs(_ urls: [URL]) -> [URL] {
+  var seenPaths = Set<String>()
+
+  return urls.filter { url in
+    seenPaths.insert(url.path).inserted
+  }
+}
+
+private func deduplicatedArticleReferences(
+  _ references: [AppleNewsArticleReference]
+) -> [AppleNewsArticleReference] {
+  var seenIDs = Set<String>()
+
+  return references.filter { reference in
+    seenIDs.insert(reference.id).inserted
+  }
+}
+
+private func discoveredAppleNewsReferences(
+  from result: LocalAppleNewsDiscoveryResult
+) -> [AppleNewsArticleReference] {
+  deduplicatedArticleReferences(
+    result.mappings.map(\.appleNews) + result.articleReferences
+  )
+  .sorted { $0.url.absoluteString < $1.url.absoluteString }
+}
+
+private func persistAndPrint(
+  _ mapping: ArticleMapping,
+  using store: ArticleMappings
+) throws {
+  try store.upsert(mapping)
+  print(mapping)
+}
+
+private func persistAndPrint(
+  _ mappings: [ArticleMapping],
+  using store: ArticleMappings
+) throws -> Int {
+  guard !mappings.isEmpty else {
+    return 0
+  }
+
+  try store.upsertAll(mappings)
+
+  for mapping in mappings {
+    print(mapping)
+  }
+
+  return mappings.count
+}
+
+private struct ResolutionSummary {
+  var persistedCount = 0
+  var reusedCount = 0
+  var failures = 0
+}
+
+private enum ResolutionOutcome: Sendable {
+  case mapping(index: Int, ArticleMapping)
+  case failure(index: Int, AppleNewsArticleReference, String)
+}
+
+private let maxResolutionConcurrency = 8
+
+private func resolveOutcome(
+  for article: AppleNewsArticleReference,
+  at index: Int,
+  using resolver: AppleNewsMappingResolver
+) async -> ResolutionOutcome {
+  do {
+    return .mapping(index: index, try await resolver.resolve(article))
+  } catch {
+    return .failure(index: index, article, error.localizedDescription)
+  }
+}
+
+private func resolveAndPersist(
+  _ articles: [AppleNewsArticleReference],
+  using store: ArticleMappings,
+  resolver: AppleNewsMappingResolver = AppleNewsMappingResolver(),
+  reuseStoredMappings: Bool = false,
+  progress: ((String) -> Void)? = nil
+) async throws -> ResolutionSummary {
+  var summary = ResolutionSummary()
+  var orderedMappings = [(Int, ArticleMapping)]()
+  var unresolvedArticles = [(Int, AppleNewsArticleReference)]()
+
+  let storedMappingsByID: [String: ArticleMapping] =
+    if reuseStoredMappings {
+      try store.mappingsByAppleNewsID()
+    } else {
+      [:]
+    }
+
+  for (index, article) in articles.enumerated() {
+    if let storedMapping = storedMappingsByID[article.id] {
+      orderedMappings.append((index, storedMapping))
+      summary.reusedCount += 1
+    } else {
+      unresolvedArticles.append((index, article))
+    }
+  }
+
+  if summary.reusedCount > 0 {
+    progress?(
+      "Reused \(summary.reusedCount) stored mappings without refetching."
+    )
+  }
+
+  if !unresolvedArticles.isEmpty {
+    progress?(
+      "Resolving \(unresolvedArticles.count) Apple News URLs with up to \(maxResolutionConcurrency) concurrent requests..."
+    )
+  }
+
+  let progressInterval = max(
+    100,
+    min(1_000, max(unresolvedArticles.count / 20, 1))
+  )
+  var processedCount = 0
+  var iterator = unresolvedArticles.makeIterator()
+
+  await withTaskGroup(of: ResolutionOutcome.self) { group in
+    for _ in 0..<min(maxResolutionConcurrency, unresolvedArticles.count) {
+      guard let (index, article) = iterator.next() else {
+        break
+      }
+
+      group.addTask {
+        await resolveOutcome(for: article, at: index, using: resolver)
+      }
+    }
+
+    while let outcome = await group.next() {
+      processedCount += 1
+
+      switch outcome {
+      case .mapping(let index, let mapping):
+        orderedMappings.append((index, mapping))
+        summary.persistedCount += 1
+      case .failure(_, let article, let message):
+        summary.failures += 1
+        writeError(
+          "Failed to resolve \(article.url.absoluteString): \(message)"
+        )
+      }
+
+      if processedCount == unresolvedArticles.count
+        || processedCount.isMultiple(of: progressInterval)
+      {
+        progress?(
+          "Processed \(processedCount)/\(unresolvedArticles.count) network lookups (\(summary.persistedCount) succeeded, \(summary.failures) failures)."
+        )
+      }
+
+      if let (index, article) = iterator.next() {
+        group.addTask {
+          await resolveOutcome(for: article, at: index, using: resolver)
+        }
+      }
+    }
+  }
+
+  let newMappings =
+    orderedMappings
+    .filter { storedMappingsByID[$0.1.id] == nil }
+    .map(\.1)
+  if !newMappings.isEmpty {
+    try store.upsertAll(newMappings)
+  }
+
+  for (_, mapping) in orderedMappings.sorted(by: { $0.0 < $1.0 }) {
+    print(mapping)
+  }
+
+  return summary
 }
 
 struct AddMapping: ParsableCommand {
@@ -43,9 +277,7 @@ struct AddMapping: ParsableCommand {
 
   mutating func run() throws {
     let mapping = ArticleMapping(appleNews: appleNews, publisher: publisher)
-    try storeOptions.store.upsert(mapping)
-
-    print(mapping)
+    try persistAndPrint(mapping, using: storeOptions.store)
   }
 }
 
@@ -63,25 +295,109 @@ struct ResolveAppleNews: AsyncParsableCommand {
 
   mutating func run() async throws {
     let store = try storeOptions.store
-    let resolver = AppleNewsMappingResolver()
-    var failures = 0
+    let summary = try await resolveAndPersist(
+      appleNews,
+      using: store,
+      progress: writeProgress
+    )
 
-    for article in appleNews {
-      do {
-        let mapping = try await resolver.resolve(article)
-        try store.upsert(mapping)
-        print(mapping)
-      } catch {
-        failures += 1
-        writeError(
-          "Failed to resolve \(article.url.absoluteString): \(error.localizedDescription)"
-        )
-      }
-    }
-
-    if failures > 0 {
+    if summary.failures > 0 {
       throw ExitCode.failure
     }
+  }
+}
+
+struct DiscoverLocalMappings: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "discover-local",
+    abstract:
+      "Scan local Apple News storage, harvest Apple News URLs, resolve publisher URLs, and persist mappings."
+  )
+
+  @OptionGroup var storeOptions: StoreOptions
+  @OptionGroup var localDiscoveryOptions: LocalDiscoveryOptions
+
+  mutating func run() async throws {
+    let store = try storeOptions.store
+    let initialCount = try store.mappingCount()
+    let discovery = LocalAppleNewsDiscovery()
+    writeProgress("Starting local discovery...")
+    let result = try discovery.discover(
+      referralItemsURL: localDiscoveryOptions.referralItemsURL,
+      searchRootURLs: localDiscoveryOptions.searchRootURLs,
+      includeFileScan: localDiscoveryOptions.exhaustiveFileScan,
+      progress: writeProgress
+    )
+    let discoveredAppleNews = discoveredAppleNewsReferences(from: result)
+    if !discoveredAppleNews.isEmpty {
+      writeProgress(
+        "Persisting \(discoveredAppleNews.count) discovered Apple News URLs..."
+      )
+      try store.upsertDiscoveries(discoveredAppleNews)
+      writeProgress(
+        "Persisted \(discoveredAppleNews.count) discovered Apple News URLs."
+      )
+    }
+    if !result.mappings.isEmpty {
+      writeProgress(
+        "Persisting \(result.mappings.count) local publisher mappings..."
+      )
+    }
+    let localCount = try persistAndPrint(result.mappings, using: store)
+    let resolutionSummary =
+      if localDiscoveryOptions.resolveMissing {
+        try await resolveAndPersist(
+          result.articleReferences,
+          using: store,
+          reuseStoredMappings: true,
+          progress: writeProgress
+        )
+      } else {
+        ResolutionSummary()
+      }
+
+    if localCount > 0 {
+      writeProgress("Persisted \(localCount) local publisher mappings.")
+    }
+
+    if resolutionSummary.reusedCount > 0 {
+      writeProgress(
+        "Reused \(resolutionSummary.reusedCount) existing stored mappings."
+      )
+    }
+
+    if !localDiscoveryOptions.resolveMissing, !result.articleReferences.isEmpty
+    {
+      writeProgress(
+        "Skipping network resolution for \(result.articleReferences.count) Apple News URLs."
+      )
+    }
+
+    writeProgress("Local discovery complete.")
+
+    print("Discovered \(discoveredAppleNews.count) Apple News URLs.")
+
+    if !result.articleReferences.isEmpty {
+      print(
+        "Found \(result.articleReferences.count) Apple News URLs without local publisher mappings."
+      )
+    }
+
+    if localCount + resolutionSummary.persistedCount
+      + resolutionSummary.reusedCount
+      == 0
+    {
+      print("No mappings discovered.")
+    }
+
+    if resolutionSummary.failures > 0 {
+      writeError(
+        "Skipped \(resolutionSummary.failures) Apple News URLs that could not be resolved."
+      )
+    }
+
+    let finalCount = try store.mappingCount()
+    print("Net new mappings added: \(max(finalCount - initialCount, 0))")
   }
 }
 
@@ -132,16 +448,26 @@ struct LookupPublisher: ParsableCommand {
 struct ListMappings: ParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "list",
-    abstract: "List recent stored mappings."
+    abstract: "List recent discovered Apple News URLs and resolved mappings."
   )
 
   @OptionGroup var storeOptions: StoreOptions
 
-  @Option(help: "Maximum number of mappings to display.")
+  @Option(help: "Maximum number of discovered items to display.")
   var limit = 20
 
   mutating func run() throws {
-    let mappings = try storeOptions.store.recentMappings(limit: limit)
+    let store = try storeOptions.store
+    let discoveryItems = try store.recentDiscoveryItems(limit: limit)
+
+    if !discoveryItems.isEmpty {
+      for item in discoveryItems {
+        print(item)
+      }
+      return
+    }
+
+    let mappings = try store.recentMappings(limit: limit)
 
     guard !mappings.isEmpty else {
       print("No mappings stored yet.")
