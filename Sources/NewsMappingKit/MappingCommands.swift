@@ -4,10 +4,9 @@ import Foundation
 typealias ProgressHandler = @Sendable (String) -> Void
 
 private enum ResolutionConfiguration {
-  static let defaultConcurrency = min(
-    32,
-    max(8, ProcessInfo.processInfo.activeProcessorCount * 2)
-  )
+  // Apple News resolution is network-bound, but live probes show throughput
+  // drops again once we push much beyond a few dozen concurrent fetches.
+  static let defaultConcurrency = 32
 
   static func progressInterval(for total: Int) -> Int {
     max(1, min(250, max(total / 100, 1)))
@@ -181,7 +180,7 @@ private func resolveOutcome(
   do {
     return .mapping(index: index, try await resolver.resolve(article))
   } catch {
-    return .failure(index: index, article, error.localizedDescription)
+    return .failure(index: index, article, resolutionErrorDescription(error))
   }
 }
 
@@ -481,21 +480,21 @@ struct LookupPublisher: ParsableCommand {
 struct ListMappings: ParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "list",
-    abstract: "List recent discovered Apple News URLs and resolved mappings."
+    abstract: "List recent resolved Apple News mappings."
   )
 
   @OptionGroup var storeOptions: StoreOptions
 
-  @Option(help: "Maximum number of discovered items to display.")
+  @Option(help: "Maximum number of mappings to display.")
   var limit = 20
 
   mutating func run() throws {
     let store = try storeOptions.store
-    let discoveryItems = try store.recentDiscoveryItems(limit: limit)
+    let mappingsByDiscovery = try store.recentDiscoveredMappings(limit: limit)
 
-    if !discoveryItems.isEmpty {
-      for item in discoveryItems {
-        print(item)
+    if !mappingsByDiscovery.isEmpty {
+      for mapping in mappingsByDiscovery {
+        print(mapping)
       }
       return
     }

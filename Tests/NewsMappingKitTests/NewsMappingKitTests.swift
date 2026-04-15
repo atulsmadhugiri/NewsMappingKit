@@ -219,7 +219,7 @@ func swiftDataStoreAddsMappedArticlesToDiscoveryList() throws {
 }
 
 @Test
-func swiftDataStoreBuildsRecentDiscoveryListItems() throws {
+func swiftDataStoreBuildsRecentDiscoveredMappings() throws {
   let store = try ArticleMappings(location: .inMemory)
   let mappedArticle = try AppleNewsArticleReference(
     id: "AgYBtZhCLTD2ZCmgVQI1g6w"
@@ -243,9 +243,9 @@ func swiftDataStoreBuildsRecentDiscoveryListItems() throws {
   )
   try store.upsertDiscoveries([mappedArticle, unmappedArticle])
 
-  let items = try store.recentDiscoveryItems(limit: 10).map(\.description)
+  let items = try store.recentDiscoveredMappings(limit: 10).map(\.description)
 
-  #expect(items.contains("https://apple.news/AE6VqukUiTbWVl_629NVnlA"))
+  #expect(!items.contains("https://apple.news/AE6VqukUiTbWVl_629NVnlA"))
   #expect(
     items.contains(
       "https://apple.news/AgYBtZhCLTD2ZCmgVQI1g6w -> https://www.latimes.com/california/story/2026-04-13/la-county-budget-upcoming"
@@ -310,6 +310,32 @@ func appleNewsResolverBuildsMappingFromFetchedHTML() async throws {
     mapping.publisher.url.absoluteString
       == "https://www.latimes.com/california/story/2026-04-13/la-county-budget-upcoming"
   )
+}
+
+@Test
+func resolutionErrorDescriptionIncludesStructuredCodes() throws {
+  let appleNews = try AppleNewsArticleReference(
+    url: #require(URL(string: "https://apple.news/AgYBtZhCLTD2ZCmgVQI1g6w"))
+  )
+
+  let httpStatusDescription = resolutionErrorDescription(
+    AppleNewsPageFetchingError.unsuccessfulStatusCode(429, appleNews.url)
+  )
+  let extractorDescription = resolutionErrorDescription(
+    AppleNewsPublisherURLExtractionError.publisherURLNotFound
+  )
+  let timeoutDescription = resolutionErrorDescription(
+    URLError(.timedOut)
+  )
+
+  #expect(httpStatusDescription.contains("HTTP 429"))
+  #expect(httpStatusDescription.contains("http_status=429"))
+  #expect(
+    extractorDescription.contains("error_code=publisher_url_not_found")
+  )
+  #expect(timeoutDescription.contains("domain=\(NSURLErrorDomain)"))
+  #expect(timeoutDescription.contains("code=-1001"))
+  #expect(timeoutDescription.contains("url_error=timedOut"))
 }
 
 @Test

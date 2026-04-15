@@ -25,6 +25,80 @@ enum AppleNewsPublisherURLExtractionError: LocalizedError {
   }
 }
 
+func resolutionErrorDescription(_ error: Error) -> String {
+  let metadata = resolutionErrorMetadata(error)
+  let message =
+    if let localizedError = error as? any LocalizedError,
+      let description = localizedError.errorDescription,
+      !description.isEmpty
+    {
+      description
+    } else {
+      error.localizedDescription
+    }
+
+  guard !metadata.isEmpty else {
+    return message
+  }
+
+  return "\(message) [\(metadata.joined(separator: " "))]"
+}
+
+private func resolutionErrorMetadata(_ error: Error) -> [String] {
+  switch error {
+  case let pageError as AppleNewsPageFetchingError:
+    switch pageError {
+    case .unsuccessfulStatusCode(let statusCode, _):
+      return ["http_status=\(statusCode)"]
+    case .invalidResponse:
+      return ["error_code=invalid_response"]
+    }
+  case AppleNewsPublisherURLExtractionError.publisherURLNotFound:
+    return ["error_code=publisher_url_not_found"]
+  case let urlError as URLError:
+    return [
+      "domain=\(NSURLErrorDomain)",
+      "code=\(urlError.errorCode)",
+      "url_error=\(urlErrorName(urlError.code))",
+    ]
+  default:
+    let nsError = error as NSError
+    return [
+      "domain=\(nsError.domain)",
+      "code=\(nsError.code)",
+    ]
+  }
+}
+
+private func urlErrorName(_ code: URLError.Code) -> String {
+  switch code {
+  case .timedOut:
+    return "timedOut"
+  case .cannotFindHost:
+    return "cannotFindHost"
+  case .cannotConnectToHost:
+    return "cannotConnectToHost"
+  case .networkConnectionLost:
+    return "networkConnectionLost"
+  case .dnsLookupFailed:
+    return "dnsLookupFailed"
+  case .notConnectedToInternet:
+    return "notConnectedToInternet"
+  case .secureConnectionFailed:
+    return "secureConnectionFailed"
+  case .badServerResponse:
+    return "badServerResponse"
+  case .resourceUnavailable:
+    return "resourceUnavailable"
+  case .appTransportSecurityRequiresSecureConnection:
+    return "appTransportSecurityRequiresSecureConnection"
+  case .cannotParseResponse:
+    return "cannotParseResponse"
+  default:
+    return "rawValue:\(code.rawValue)"
+  }
+}
+
 struct AppleNewsPageFetcher: Sendable {
   private let client: any HTTPClient
 

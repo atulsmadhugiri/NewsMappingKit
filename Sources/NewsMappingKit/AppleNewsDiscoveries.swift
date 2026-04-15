@@ -74,6 +74,10 @@ final class AppleNewsDiscoveries {
     try recentRecords(limit: limit).map { try $0.article }
   }
 
+  func allArticles() throws -> [AppleNewsArticleReference] {
+    try sortedRecords().map { try $0.article }
+  }
+
   private func recentRecords(limit: Int) -> [AppleNewsDiscoveryRecord] {
     Array(
       sortedRecords()

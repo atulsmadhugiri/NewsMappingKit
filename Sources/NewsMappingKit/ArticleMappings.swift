@@ -15,20 +15,6 @@ enum ArticleMappingStoreError: LocalizedError {
   }
 }
 
-enum StoredAppleNewsListItem: Sendable, CustomStringConvertible {
-  case mapping(ArticleMapping)
-  case article(AppleNewsArticleReference)
-
-  var description: String {
-    switch self {
-    case .mapping(let mapping):
-      return mapping.description
-    case .article(let article):
-      return article.url.absoluteString
-    }
-  }
-}
-
 final class ArticleMappings {
   enum Location: Sendable {
     case automatic
@@ -94,22 +80,31 @@ final class ArticleMappings {
     try discoveries.recentArticles(limit: limit)
   }
 
-  func recentDiscoveryItems(limit: Int = 20) throws -> [StoredAppleNewsListItem]
-  {
-    let discoveries = try recentDiscoveries(limit: limit)
+  func recentDiscoveredMappings(limit: Int = 20) throws -> [ArticleMapping] {
+    guard limit > 0 else {
+      return []
+    }
+
+    let discoveries = try discoveries.allArticles()
     guard !discoveries.isEmpty else {
       return []
     }
 
     let mappingsByID = try mappingsByAppleNewsID()
+    var results = [ArticleMapping]()
+    results.reserveCapacity(limit)
 
-    return discoveries.map { article in
+    for article in discoveries {
       if let mapping = mappingsByID[article.id] {
-        return .mapping(mapping)
-      }
+        results.append(mapping)
 
-      return .article(article)
+        if results.count == limit {
+          break
+        }
+      }
     }
+
+    return results
   }
 
   private func upsert(_ mapping: ArticleMapping, saveChanges: Bool) throws {
