@@ -4,7 +4,7 @@ import Foundation
 private enum BlueskySearchDefaults {
   static let query = "apple.news"
   static let limit = 25
-  static let maxPages = 10
+  static let maxPages = 100
   static let pageSize = 100
 }
 
