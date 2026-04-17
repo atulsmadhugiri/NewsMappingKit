@@ -8,6 +8,16 @@ let package = Package(
   platforms: [
     .macOS(.v14)
   ],
+  products: [
+    .library(
+      name: "NewsMappingCore",
+      targets: ["NewsMappingCore"]
+    ),
+    .executable(
+      name: "NewsMappingKit",
+      targets: ["NewsMappingKit"]
+    ),
+  ],
   dependencies: [
     .package(
       url: "https://github.com/apple/swift-argument-parser",
@@ -15,15 +25,17 @@ let package = Package(
     )
   ],
   targets: [
+    .target(name: "NewsMappingCore"),
     .executableTarget(
       name: "NewsMappingKit",
       dependencies: [
+        "NewsMappingCore",
         .product(name: "ArgumentParser", package: "swift-argument-parser")
       ]
     ),
     .testTarget(
       name: "NewsMappingKitTests",
-      dependencies: ["NewsMappingKit"]
+      dependencies: ["NewsMappingCore"]
     ),
   ],
   swiftLanguageModes: [.v6]

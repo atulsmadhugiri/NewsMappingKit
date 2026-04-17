@@ -1,10 +1,10 @@
 import Foundation
 
-enum AppleNewsPageFetchingError: LocalizedError {
+public enum AppleNewsPageFetchingError: LocalizedError {
   case invalidResponse(URL)
   case unsuccessfulStatusCode(Int, URL)
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .invalidResponse(let url):
       return "Expected an HTTP response for \(url.absoluteString)."
@@ -14,11 +14,11 @@ enum AppleNewsPageFetchingError: LocalizedError {
   }
 }
 
-enum AppleNewsPublisherURLExtractionError: LocalizedError {
+public enum AppleNewsPublisherURLExtractionError: LocalizedError {
   case publisherURLNotFound
   case webFallbackNotAvailable
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .publisherURLNotFound:
       return "Could not find a publisher URL in the Apple News page."
@@ -29,7 +29,7 @@ enum AppleNewsPublisherURLExtractionError: LocalizedError {
   }
 }
 
-func resolutionErrorDescription(_ error: Error) -> String {
+public func resolutionErrorDescription(_ error: Error) -> String {
   let metadata = resolutionErrorMetadata(error)
   let message =
     if let localizedError = error as? any LocalizedError,
@@ -105,14 +105,15 @@ private func urlErrorName(_ code: URLError.Code) -> String {
   }
 }
 
-struct AppleNewsPageFetcher: Sendable {
+public struct AppleNewsPageFetcher: Sendable {
   private let client: any HTTPClient
 
-  init(client: some HTTPClient = URLSessionHTTPClient()) {
+  public init(client: some HTTPClient = URLSessionHTTPClient()) {
     self.client = client
   }
 
-  func fetchHTML(for article: AppleNewsArticleReference) async throws -> String
+  public func fetchHTML(for article: AppleNewsArticleReference) async throws
+    -> String
   {
     var request = URLRequest(url: article.url)
     request.timeoutInterval = 30
@@ -135,8 +136,12 @@ struct AppleNewsPageFetcher: Sendable {
   }
 }
 
-struct AppleNewsPublisherURLExtractor: Sendable {
-  func publisherReference(in html: String) throws -> PublisherArticleReference {
+public struct AppleNewsPublisherURLExtractor: Sendable {
+  public init() {}
+
+  public func publisherReference(in html: String) throws
+    -> PublisherArticleReference
+  {
     for candidate in [
       firstMatch(of: #/redirectToUrl(?:AfterTimeout)?\("([^"]+)"/#, in: html),
       firstMatch(of: #/<a href="([^"]+)"><span class="click-here">/#, in: html),
@@ -166,11 +171,11 @@ struct AppleNewsPublisherURLExtractor: Sendable {
   }
 }
 
-struct AppleNewsMappingResolver: Sendable {
-  let fetcher: AppleNewsPageFetcher
-  let extractor: AppleNewsPublisherURLExtractor
+public struct AppleNewsMappingResolver: Sendable {
+  public let fetcher: AppleNewsPageFetcher
+  public let extractor: AppleNewsPublisherURLExtractor
 
-  init(
+  public init(
     fetcher: AppleNewsPageFetcher = AppleNewsPageFetcher(),
     extractor: AppleNewsPublisherURLExtractor = AppleNewsPublisherURLExtractor()
   ) {
@@ -178,7 +183,7 @@ struct AppleNewsMappingResolver: Sendable {
     self.extractor = extractor
   }
 
-  func resolve(_ article: AppleNewsArticleReference) async throws
+  public func resolve(_ article: AppleNewsArticleReference) async throws
     -> ArticleMapping
   {
     let html = try await fetcher.fetchHTML(for: article)

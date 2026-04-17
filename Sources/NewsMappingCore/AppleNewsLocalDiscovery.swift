@@ -1,11 +1,11 @@
 import Foundation
 import SQLite3
 
-enum LocalAppleNewsDiscoveryError: LocalizedError {
+public enum LocalAppleNewsDiscoveryError: LocalizedError {
   case invalidReferralItemsDirectory(URL)
   case publisherURLNotFound
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .invalidReferralItemsDirectory(let url):
       return
@@ -16,7 +16,7 @@ enum LocalAppleNewsDiscoveryError: LocalizedError {
   }
 }
 
-enum LocalAppleNewsPaths {
+public enum LocalAppleNewsPaths {
   private static let homeDirectoryURL = FileManager.default
     .homeDirectoryForCurrentUser
 
@@ -27,46 +27,46 @@ enum LocalAppleNewsPaths {
     homeDirectoryURL.appending(path: path, directoryHint: directoryHint)
   }
 
-  static let referralItemsURL = homeURL(
+  public static let referralItemsURL = homeURL(
     "Library/News/com.apple.news.public-com.apple.news.private-production/referralItems",
     directoryHint: .isDirectory
   )
 
-  static let newsStorageURL = referralItemsURL.deletingLastPathComponent()
+  public static let newsStorageURL = referralItemsURL.deletingLastPathComponent()
 
-  static let newsContainerURL = homeURL(
+  public static let newsContainerURL = homeURL(
     "Library/Containers/com.apple.news",
     directoryHint: .isDirectory
   )
 
-  static let newsCacheURL = newsContainerURL.appending(
+  public static let newsCacheURL = newsContainerURL.appending(
     path: "Data/Library/Caches/News/com.apple.news.public-production-143441",
     directoryHint: .isDirectory
   )
 
-  static let articleExposuresURL = homeURL(
+  public static let articleExposuresURL = homeURL(
     "Library/Group Containers/group.com.apple.news/com.apple.news.public-com.apple.news.private-production/article_exposures",
     directoryHint: .notDirectory
   )
 
-  static let feedDatabaseURL = newsCacheURL.appending(
+  public static let feedDatabaseURL = newsCacheURL.appending(
     path: "feeddatabase",
     directoryHint: .notDirectory
   )
 
-  static let todayFeedDatabaseURL = newsCacheURL.appending(
+  public static let todayFeedDatabaseURL = newsCacheURL.appending(
     path: "today-feed-db",
     directoryHint: .notDirectory
   )
 
-  static let protectedStoreReferenceCacheURL = URL.applicationSupportDirectory
+  public static let protectedStoreReferenceCacheURL = URL.applicationSupportDirectory
     .appending(path: "NewsMappingKit", directoryHint: .isDirectory)
     .appending(
       path: "LocalAppleNewsProtectedStoreReferences.json",
       directoryHint: .notDirectory
     )
 
-  static let defaultSearchRootURLs = [
+  public static let defaultSearchRootURLs = [
     newsStorageURL,
     homeURL("Library/Caches/com.apple.newsd", directoryHint: .isDirectory),
     homeURL(
@@ -420,14 +420,20 @@ struct BinaryStringExtractor: Sendable {
   }
 }
 
-struct LocalAppleNewsReferenceExtractor: Sendable {
+public struct LocalAppleNewsReferenceExtractor: Sendable {
   let stringExtractor: BinaryStringExtractor
 
-  init(stringExtractor: BinaryStringExtractor = BinaryStringExtractor()) {
+  public init() {
+    self.stringExtractor = BinaryStringExtractor()
+  }
+
+  init(stringExtractor: BinaryStringExtractor) {
     self.stringExtractor = stringExtractor
   }
 
-  func articleReferences(in data: Data) -> [AppleNewsArticleReference] {
+  public func articleReferences(in data: Data)
+    -> [AppleNewsArticleReference]
+  {
     let fragments = normalizedFragments(in: data)
     var results = [AppleNewsArticleReference]()
     var seenIDs = Set<String>()
@@ -974,15 +980,21 @@ struct LocalAppleNewsDatabaseReferenceDiscoverer: Sendable {
   }
 }
 
-struct LocalAppleNewsDiscoveryResult: Sendable {
-  let mappings: [ArticleMapping]
-  let articleReferences: [AppleNewsArticleReference]
+public struct LocalAppleNewsDiscoveryResult: Sendable {
+  public let mappings: [ArticleMapping]
+  public let articleReferences: [AppleNewsArticleReference]
 }
 
-struct LocalAppleNewsDiscovery: Sendable {
+public struct LocalAppleNewsDiscovery: Sendable {
   let entryDiscovery: LocalReferralEntryDiscovery
   let databaseDiscoverer: LocalAppleNewsDatabaseReferenceDiscoverer
   let referenceDiscoverer: LocalAppleNewsReferenceDiscoverer
+
+  public init() {
+    self.entryDiscovery = LocalReferralEntryDiscovery()
+    self.databaseDiscoverer = LocalAppleNewsDatabaseReferenceDiscoverer()
+    self.referenceDiscoverer = LocalAppleNewsReferenceDiscoverer()
+  }
 
   init(
     entryDiscovery: LocalReferralEntryDiscovery = LocalReferralEntryDiscovery(),
@@ -996,7 +1008,7 @@ struct LocalAppleNewsDiscovery: Sendable {
     self.referenceDiscoverer = referenceDiscoverer
   }
 
-  func discover(
+  public func discover(
     referralItemsURL: URL,
     searchRootURLs: [URL],
     includeFileScan: Bool = false,

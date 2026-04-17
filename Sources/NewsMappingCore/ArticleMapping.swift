@@ -1,14 +1,14 @@
 import Foundation
 
-struct ArticleMapping: Identifiable, Hashable, Codable, Sendable,
+public struct ArticleMapping: Identifiable, Hashable, Codable, Sendable,
   CustomStringConvertible
 {
-  let appleNews: AppleNewsArticleReference
-  let publisher: PublisherArticleReference
-  let discoveredAt: Date
-  let lastResolvedAt: Date
+  public let appleNews: AppleNewsArticleReference
+  public let publisher: PublisherArticleReference
+  public let discoveredAt: Date
+  public let lastResolvedAt: Date
 
-  init(
+  public init(
     appleNews: AppleNewsArticleReference,
     publisher: PublisherArticleReference,
     discoveredAt: Date = .now,
@@ -20,11 +20,11 @@ struct ArticleMapping: Identifiable, Hashable, Codable, Sendable,
     self.lastResolvedAt = lastResolvedAt
   }
 
-  var id: String {
+  public var id: String {
     appleNews.id
   }
 
-  var description: String {
+  public var description: String {
     "\(appleNews) -> \(publisher)"
   }
 }

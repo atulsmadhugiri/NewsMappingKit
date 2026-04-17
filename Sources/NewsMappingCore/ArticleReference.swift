@@ -1,16 +1,15 @@
-import ArgumentParser
 import Foundation
 
 private let appleNewsHost = "apple.news"
 
-enum ArticleReferenceError: LocalizedError {
+public enum ArticleReferenceError: LocalizedError {
   case invalidURL(String)
   case missingHost(URL)
   case invalidAppleNewsHost(URL)
   case missingAppleNewsIdentifier(URL)
   case publisherURLUsesAppleNewsHost(URL)
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .invalidURL(let argument):
       return "Invalid URL: \(argument)"
@@ -29,29 +28,13 @@ enum ArticleReferenceError: LocalizedError {
   }
 }
 
-private protocol URLArgumentConvertible: ExpressibleByArgument {
-  init(url: URL) throws
-}
-
-extension URLArgumentConvertible {
-  init?(argument: String) {
-    guard let url = URL(string: argument),
-      let reference = try? Self(url: url)
-    else {
-      return nil
-    }
-
-    self = reference
-  }
-}
-
-struct AppleNewsArticleReference: Hashable, Codable, Sendable,
-  CustomStringConvertible, URLArgumentConvertible
+public struct AppleNewsArticleReference: Hashable, Codable, Sendable,
+  CustomStringConvertible
 {
-  let id: String
-  let url: URL
+  public let id: String
+  public let url: URL
 
-  init(id: String) throws {
+  public init(id: String) throws {
     let trimmedID = id.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedID.isEmpty else {
       throw ArticleReferenceError.missingAppleNewsIdentifier(
@@ -64,7 +47,7 @@ struct AppleNewsArticleReference: Hashable, Codable, Sendable,
     )
   }
 
-  init(url: URL) throws {
+  public init(url: URL) throws {
     let canonicalURL = try url.canonicalizedForMapping()
 
     guard canonicalURL.host?.lowercased() == appleNewsHost else {
@@ -91,17 +74,17 @@ struct AppleNewsArticleReference: Hashable, Codable, Sendable,
     self.url = secureURL
   }
 
-  var description: String {
+  public var description: String {
     url.absoluteString
   }
 }
 
-struct PublisherArticleReference: Hashable, Codable, Sendable,
-  CustomStringConvertible, URLArgumentConvertible
+public struct PublisherArticleReference: Hashable, Codable, Sendable,
+  CustomStringConvertible
 {
-  let url: URL
+  public let url: URL
 
-  init(url: URL) throws {
+  public init(url: URL) throws {
     let canonicalURL = try url.canonicalizedForMapping()
 
     guard let host = canonicalURL.host else {
@@ -115,7 +98,7 @@ struct PublisherArticleReference: Hashable, Codable, Sendable,
     self.url = canonicalURL
   }
 
-  var description: String {
+  public var description: String {
     url.absoluteString
   }
 }

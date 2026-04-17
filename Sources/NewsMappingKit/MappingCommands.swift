@@ -1,7 +1,6 @@
 import ArgumentParser
 import Foundation
-
-typealias ProgressHandler = @Sendable (String) -> Void
+import NewsMappingCore
 
 private enum ResolutionConfiguration {
   // Apple News resolution is network-bound, but live probes show throughput

@@ -1,14 +1,14 @@
 import Foundation
 
-protocol HTTPClient: Sendable {
+public protocol HTTPClient: Sendable {
   func data(for request: URLRequest) async throws -> (Data, URLResponse)
 }
 
-enum HTTPClientConfiguration {
-  static let maximumConnectionsPerHost = 64
+public enum HTTPClientConfiguration {
+  public static let maximumConnectionsPerHost = 64
 }
 
-struct URLSessionHTTPClient: HTTPClient {
+public struct URLSessionHTTPClient: HTTPClient {
   private static let session: URLSession = {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.httpMaximumConnectionsPerHost =
@@ -20,7 +20,11 @@ struct URLSessionHTTPClient: HTTPClient {
     return URLSession(configuration: configuration)
   }()
 
-  func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+  public init() {}
+
+  public func data(for request: URLRequest) async throws
+    -> (Data, URLResponse)
+  {
     try await Self.session.data(for: request)
   }
 }

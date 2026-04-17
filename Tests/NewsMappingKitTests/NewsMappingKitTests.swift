@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 import Testing
 
-@testable import NewsMappingKit
+@testable import NewsMappingCore
 
 private struct MockHTTPClient: HTTPClient {
   let responses: [URL: String]
@@ -129,12 +129,16 @@ func swiftDataStoreRoundTripsMappings() throws {
   let appleNewsLookup = try #require(
     try store.mapping(forPublisher: publisher)
   )
+  let appleNewsURLLookup = try #require(
+    try store.appleNewsReference(forPublisherURL: publisher.url)
+  )
 
   #expect(
     publisherLookup.publisher.url.absoluteString
       == "https://www.latimes.com/california/story/2026-04-13/la-county-budget-upcoming"
   )
   #expect(appleNewsLookup.appleNews.id == appleNews.id)
+  #expect(appleNewsURLLookup.id == appleNews.id)
 }
 
 @Test

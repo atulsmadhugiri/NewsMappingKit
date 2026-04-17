@@ -1,11 +1,11 @@
 import Foundation
 import SwiftData
 
-enum ArticleMappingStoreError: LocalizedError {
+public enum ArticleMappingStoreError: LocalizedError {
   case invalidStoredURL(String)
   case missingMapping(String)
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .invalidStoredURL(let value):
       return "Stored mapping contains an invalid URL: \(value)"
@@ -15,8 +15,8 @@ enum ArticleMappingStoreError: LocalizedError {
   }
 }
 
-final class ArticleMappings {
-  enum Location: Sendable {
+public final class ArticleMappings {
+  public enum Location: Sendable {
     case automatic
     case file(URL)
     case inMemory
@@ -27,7 +27,7 @@ final class ArticleMappings {
   private let context: ModelContext
   private let discoveries: AppleNewsDiscoveries
 
-  init(location: Location = .automatic) throws {
+  public init(location: Location = .automatic) throws {
     let container = try ModelContainer(
       for: ArticleMappingRecord.self,
       configurations: Self.configuration(for: location)
@@ -40,12 +40,12 @@ final class ArticleMappings {
     )
   }
 
-  func upsert(_ mapping: ArticleMapping) throws {
+  public func upsert(_ mapping: ArticleMapping) throws {
     try upsert(mapping, saveChanges: true)
     try discoveries.upsertAll([mapping.appleNews])
   }
 
-  func upsertAll(_ mappings: [ArticleMapping]) throws {
+  public func upsertAll(_ mappings: [ArticleMapping]) throws {
     guard !mappings.isEmpty else {
       return
     }
@@ -58,29 +58,32 @@ final class ArticleMappings {
     try discoveries.upsertAll(mappings.map(\.appleNews))
   }
 
-  func allMappings() throws -> [ArticleMapping] {
+  public func allMappings() throws -> [ArticleMapping] {
     try context.fetch(FetchDescriptor<ArticleMappingRecord>()).map {
       try $0.mapping
     }
   }
 
-  func mappingsByAppleNewsID() throws -> [String: ArticleMapping] {
+  public func mappingsByAppleNewsID() throws -> [String: ArticleMapping] {
     Dictionary(
       try allMappings().map { ($0.id, $0) },
       uniquingKeysWith: { _, latest in latest }
     )
   }
 
-  func upsertDiscoveries(_ articles: [AppleNewsArticleReference]) throws {
+  public func upsertDiscoveries(_ articles: [AppleNewsArticleReference]) throws {
     try discoveries.upsertAll(articles)
   }
 
-  func recentDiscoveries(limit: Int = 20) throws -> [AppleNewsArticleReference]
+  public func recentDiscoveries(limit: Int = 20) throws
+    -> [AppleNewsArticleReference]
   {
     try discoveries.recentArticles(limit: limit)
   }
 
-  func recentDiscoveredMappings(limit: Int = 20) throws -> [ArticleMapping] {
+  public func recentDiscoveredMappings(limit: Int = 20) throws
+    -> [ArticleMapping]
+  {
     guard limit > 0 else {
       return []
     }
@@ -139,7 +142,7 @@ final class ArticleMappings {
     }
   }
 
-  func mapping(forAppleNews article: AppleNewsArticleReference) throws
+  public func mapping(forAppleNews article: AppleNewsArticleReference) throws
     -> ArticleMapping?
   {
     try firstRecord(
@@ -149,7 +152,7 @@ final class ArticleMappings {
     )?.mapping
   }
 
-  func mapping(forPublisher article: PublisherArticleReference) throws
+  public func mapping(forPublisher article: PublisherArticleReference) throws
     -> ArticleMapping?
   {
     try firstRecord(
@@ -159,7 +162,7 @@ final class ArticleMappings {
     )?.mapping
   }
 
-  func recentMappings(limit: Int = 20) throws -> [ArticleMapping] {
+  public func recentMappings(limit: Int = 20) throws -> [ArticleMapping] {
     var descriptor = FetchDescriptor<ArticleMappingRecord>(
       sortBy: [SortDescriptor(\.lastResolvedAt, order: .reverse)]
     )
@@ -168,8 +171,18 @@ final class ArticleMappings {
     return try context.fetch(descriptor).map { try $0.mapping }
   }
 
-  func mappingCount() throws -> Int {
+  public func mappingCount() throws -> Int {
     try context.fetch(FetchDescriptor<ArticleMappingRecord>()).count
+  }
+
+  public func mapping(forPublisherURL url: URL) throws -> ArticleMapping? {
+    try mapping(forPublisher: PublisherArticleReference(url: url))
+  }
+
+  public func appleNewsReference(forPublisherURL url: URL) throws
+    -> AppleNewsArticleReference?
+  {
+    try mapping(forPublisherURL: url)?.appleNews
   }
 
   private func firstRecord(
