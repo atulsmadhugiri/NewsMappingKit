@@ -288,6 +288,22 @@ func publisherURLExtractorFallsBackToClickHereLink() throws {
 }
 
 @Test
+func publisherURLExtractorClassifiesPagesWithoutWebFallback() {
+  let html = """
+    <html>
+      <body>
+        <p>For the best reading experience, open this story on a device with Apple News.</p>
+        <p>It may also be available on the publisher&#8217;s website.</p>
+      </body>
+    </html>
+    """
+
+  #expect(throws: AppleNewsPublisherURLExtractionError.webFallbackNotAvailable) {
+    try AppleNewsPublisherURLExtractor().publisherReference(in: html)
+  }
+}
+
+@Test
 func appleNewsResolverBuildsMappingFromFetchedHTML() async throws {
   let appleNews = try AppleNewsArticleReference(
     url: #require(URL(string: "https://apple.news/AgYBtZhCLTD2ZCmgVQI1g6w"))
@@ -324,6 +340,9 @@ func resolutionErrorDescriptionIncludesStructuredCodes() throws {
   let extractorDescription = resolutionErrorDescription(
     AppleNewsPublisherURLExtractionError.publisherURLNotFound
   )
+  let webFallbackDescription = resolutionErrorDescription(
+    AppleNewsPublisherURLExtractionError.webFallbackNotAvailable
+  )
   let timeoutDescription = resolutionErrorDescription(
     URLError(.timedOut)
   )
@@ -332,6 +351,9 @@ func resolutionErrorDescriptionIncludesStructuredCodes() throws {
   #expect(httpStatusDescription.contains("http_status=429"))
   #expect(
     extractorDescription.contains("error_code=publisher_url_not_found")
+  )
+  #expect(
+    webFallbackDescription.contains("error_code=web_fallback_not_available")
   )
   #expect(timeoutDescription.contains("domain=\(NSURLErrorDomain)"))
   #expect(timeoutDescription.contains("code=-1001"))

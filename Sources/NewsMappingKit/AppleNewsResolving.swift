@@ -16,11 +16,15 @@ enum AppleNewsPageFetchingError: LocalizedError {
 
 enum AppleNewsPublisherURLExtractionError: LocalizedError {
   case publisherURLNotFound
+  case webFallbackNotAvailable
 
   var errorDescription: String? {
     switch self {
     case .publisherURLNotFound:
       return "Could not find a publisher URL in the Apple News page."
+    case .webFallbackNotAvailable:
+      return
+        "Apple News page does not expose a publisher URL; article appears to be app-only or unavailable on the web."
     }
   }
 }
@@ -55,6 +59,8 @@ private func resolutionErrorMetadata(_ error: Error) -> [String] {
     }
   case AppleNewsPublisherURLExtractionError.publisherURLNotFound:
     return ["error_code=publisher_url_not_found"]
+  case AppleNewsPublisherURLExtractionError.webFallbackNotAvailable:
+    return ["error_code=web_fallback_not_available"]
   case let urlError as URLError:
     return [
       "domain=\(NSURLErrorDomain)",
@@ -143,6 +149,10 @@ struct AppleNewsPublisherURLExtractor: Sendable {
       }
 
       return reference
+    }
+
+    if html.contains("It may also be available on the publisher") {
+      throw AppleNewsPublisherURLExtractionError.webFallbackNotAvailable
     }
 
     throw AppleNewsPublisherURLExtractionError.publisherURLNotFound
